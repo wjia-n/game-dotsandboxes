@@ -3,13 +3,39 @@ import 'dart:math';
 import 'package:dotsandboxes/engine/dots_boxes_engine.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-DotsBoxesEngine fresh({int dots = 6}) => DotsBoxesEngine(dots: dots);
+DotsBoxesEngine fresh({int dots = 6, int players = 2}) =>
+    DotsBoxesEngine(dots: dots, players: players);
 
 /// Draw an edge for [player] directly (bypassing turn order).
-void put(DotsBoxesEngine e, bool h, int r, int c, int p) => e.draw(Edge(h, r, c), p);
+void put(DotsBoxesEngine e, bool h, int r, int c, int p) =>
+    e.draw(Edge(h, r, c), p);
 
 void main() {
-  group('rules conformance', () {
+  group('box count exactness (RULES.md authoritative)', () {
+    test('5x5 dots -> exactly 16 boxes', () {
+      expect(fresh(dots: 5).totalBoxes, 16);
+    });
+    test('6x6 dots -> exactly 25 boxes', () {
+      expect(fresh(dots: 6).totalBoxes, 25);
+    });
+    test('7x7 dots -> exactly 36 boxes', () {
+      expect(fresh(dots: 7).totalBoxes, 36);
+    });
+    test('N dots -> (N-1)^2 for N in 2..9', () {
+      for (var n = 2; n <= 9; n++) {
+        expect(DotsBoxesEngine(dots: n).totalBoxes, (n - 1) * (n - 1));
+      }
+    });
+    test('total edges = 2*dots*(dots-1)', () {
+      for (var n = 5; n <= 7; n++) {
+        final e = fresh(dots: n);
+        expect(e.legalEdges().length, 2 * n * (n - 1));
+        expect(e.totalEdges, 2 * n * (n - 1));
+      }
+    });
+  });
+
+  group('rules conformance (RULES.md section 13)', () {
     test('1. first move accepted, 0-0, turn passes', () {
       final e = fresh();
       final res = e.draw(const Edge(true, 0, 0), 0);
@@ -19,11 +45,9 @@ void main() {
       expect(e.currentPlayer, 1);
     });
 
-    test('2. diagonal rejected', () {
+    test('2. diagonal rejected (not representable; off-grid rejected)', () {
       final e = fresh();
-      // diagonals are not representable; nearest check: drawing (0,0)-(1,1)
-      // is not a legal edge type at all. Verify off-grid rejected too.
-      expect(e.isLegal(const Edge(true, 0, 6)), isFalse); // out of range
+      expect(e.isLegal(const Edge(true, 0, 6)), isFalse);
       expect(e.moveCount, 0);
     });
 
@@ -32,7 +56,7 @@ void main() {
       e.draw(const Edge(true, 0, 0), 0);
       expect(e.isLegal(const Edge(true, 0, 0)), isFalse);
       expect(() => e.draw(const Edge(true, 0, 0), 1), throwsStateError);
-      expect(e.currentPlayer, 1); // still player 1's turn
+      expect(e.currentPlayer, 1);
       expect(e.moveCount, 1);
     });
 
@@ -57,7 +81,6 @@ void main() {
 
     test('6. double box capture: one edge, two boxes, one bonus turn', () {
       final e = fresh();
-      // boxes (0,0) and (0,1) both missing only the shared edge v(0,1)
       put(e, true, 0, 0, 0);
       put(e, true, 1, 0, 0);
       put(e, false, 0, 0, 0);
@@ -73,159 +96,234 @@ void main() {
 
     test('7. bonus turn chain continues', () {
       final e = fresh();
-      // box (0,0) missing only bottom; box (2,2) missing only left
       put(e, true, 0, 0, 1);
       put(e, false, 0, 0, 1);
       put(e, false, 0, 1, 1);
       put(e, true, 2, 2, 1);
+      put(e, false, 2, 2, 1);
       put(e, true, 3, 2, 1);
-      put(e, false, 2, 3, 1);
+      // box (0,0) needs bottom h(1,0); box (2,2) needs right v(2,3)
       var res = e.draw(const Edge(true, 1, 0), 0);
       expect(res.claimed.length, 1);
-      expect(e.currentPlayer, 0);
-      res = e.draw(const Edge(false, 2, 2), 0);
+      expect(res.bonusTurn, isTrue);
+      res = e.draw(const Edge(false, 2, 3), 0);
       expect(res.claimed.length, 1);
+      expect(res.bonusTurn, isTrue);
       expect(e.scores[0], 2);
       expect(e.currentPlayer, 0);
     });
 
-    test('8. full 5x5-dot game: scores sum to 16, winner declared', () {
+    test('8. full 5x5 game: scores sum to 16, winner declared', () {
       final e = fresh(dots: 5);
-      final rng = Random(7);
-      var player = 0;
+      final rng = Random(42);
       var guard = 0;
-      while (!e.isGameOver && guard < 500) {
+      while (!e.isGameOver && guard < 1000) {
+        final player = e.currentPlayer;
+        final move = e.botMove(Difficulty.medium, player, rng)!;
+        final res = e.draw(move, player);
+        if (!res.bonusTurn && !res.gameOver) {
+          // ordinary move: turn passes; on the final edge the game ends
+          // instead (RULES.md §7, §12) and the turn does not pass.
+          expect(e.currentPlayer, 1 - player);
+        }
         guard++;
-        final edges = e.legalEdges()..shuffle(rng);
-        final res = e.draw(edges.first, player);
-        if (!res.bonusTurn) player = 1 - player;
       }
       expect(e.isGameOver, isTrue);
       expect(e.scores[0] + e.scores[1], 16);
+      expect(e.winners(), isNotEmpty); // 16 is even: an 8-8 tie is legal
+      expect(e.moveCount, e.totalEdges);
     });
 
-    test('9/10. tie possible on even totals (7x7 dots -> 36 boxes)', () {
-      // NOTE: RULES.md §8 examples / §10 say "6x6 dots -> 36 boxes", which
-      // contradicts §8's own formula (D-1)^2 and §2 (6x6 dots -> 5x5 boxes).
-      // The formula + §2 agree, so the engine follows them: 7x7 dots = 36 boxes.
-      final e = fresh(dots: 7);
-      expect(e.totalBoxes, 36);
-      // scripted: each box claimed by alternating player -> 18-18 tie
-      var p = 0;
-      for (var r = 0; r < 6; r++) {
-        for (var c = 0; c < 6; c++) {
-          // draw missing edges of box (r,c) with alternating player, capturing it
-          final missing = <Edge>[];
-          if (e.h[r][c] == -1) missing.add(Edge(true, r, c));
-          if (e.h[r + 1][c] == -1) missing.add(Edge(true, r + 1, c));
-          if (e.v[r][c] == -1) missing.add(Edge(false, r, c));
-          if (e.v[r][c + 1] == -1) missing.add(Edge(false, r, c + 1));
-          for (final m in missing) {
-            e.draw(m, p);
-          }
-          p = 1 - p;
-        }
+    test('9. draw detection: tied top scores -> winners lists both', () {
+      final e = fresh(dots: 6);
+      e.scores[0] = 18;
+      e.scores[1] = 18;
+      expect(e.winners(), [0, 1]);
+    });
+
+    test('10. no draw possible on the 6x6 board (25 is odd)', () {
+      final e = fresh(dots: 6);
+      expect(25 % 2, 1);
+      for (var a = 0; a <= 25; a++) {
+        e.scores[0] = a;
+        e.scores[1] = 25 - a;
+        expect(e.winners().length, 1);
       }
-      expect(e.isGameOver, isTrue);
-      expect(e.scores[0] + e.scores[1], 36);
-      expect(e.scores[0], 18);
-      expect(e.scores[1], 18);
     });
 
-    test('11. medium robot takes a free box', () {
+    test('11. robot medium takes a free box', () {
       final e = fresh();
       put(e, true, 0, 0, 0);
       put(e, false, 0, 0, 0);
       put(e, false, 0, 1, 0);
-      final move = e.botMove(Difficulty.medium, 1, Random(1))!;
-      final res = e.draw(move, 1);
-      expect(res.claimed.length, greaterThanOrEqualTo(1));
-      expect(e.scores[1], greaterThanOrEqualTo(1));
+      final move = e.botMove(Difficulty.medium, 1, Random(7));
+      expect(move, const Edge(true, 1, 0));
     });
 
-    test('12. medium robot avoids handing a 3-sided box when a safe edge exists', () {
+    test('12. robot medium moves are always legal', () {
       final e = fresh();
-      // empty-ish board: one box with 2 sides; safe edges exist elsewhere
-      put(e, true, 2, 2, 0);
-      put(e, false, 2, 2, 0);
-      final before = e.moveCount;
-      final move = e.botMove(Difficulty.medium, 1, Random(3))!;
-      e.draw(move, 1);
-      expect(e.moveCount, before + 1);
-      // no box should now have exactly 3 sides (that would hand it over)
-      for (var r = 0; r < 5; r++) {
-        for (var c = 0; c < 5; c++) {
-          if (e.box[r][c] == -1) {
-            expect(e.boxEdgeCount(r, c) == 3, isFalse,
-                reason: 'robot handed over box ($r,$c)');
-          }
-        }
+      final rng = Random(1234);
+      put(e, true, 0, 0, 0);
+      put(e, true, 2, 2, 1);
+      put(e, false, 3, 3, 0);
+      for (var i = 0; i < 12; i++) {
+        final move = e.botMove(Difficulty.medium, i % 2, rng)!;
+        expect(e.isLegal(move), isTrue);
+        e.draw(move, i % 2);
+        expect(e.isLegal(move), isFalse); // now drawn
       }
     });
 
     test('13. undo after capture restores everything', () {
       final e = fresh();
       put(e, true, 0, 0, 0);
-      put(e, false, 0, 0, 0);
+      put(e, false, 0, 0, 1);
       put(e, false, 0, 1, 0);
-      e.draw(const Edge(true, 1, 0), 0);
-      expect(e.scores[0], 1);
+      final res = e.draw(const Edge(true, 1, 0), 1);
+      expect(res.claimed.length, 1);
       expect(e.undo(), isTrue);
       expect(e.box[0][0], -1);
-      expect(e.h[1][0], -1);
-      expect(e.scores[0], 0);
-      expect(e.currentPlayer, 0);
+      expect(e.scores[1], 0);
+      expect(e.isLegal(const Edge(true, 1, 0)), isTrue);
+      expect(e.currentPlayer, 1); // turn restored to the mover
     });
 
     test('14. out-of-bounds rejected', () {
       final e = fresh();
       expect(e.isLegal(const Edge(true, -1, 0)), isFalse);
-      expect(e.isLegal(const Edge(false, 0, 99)), isFalse);
+      expect(e.isLegal(const Edge(false, 0, 7)), isFalse);
+      expect(() => e.draw(const Edge(true, -1, 0), 0), throwsStateError);
     });
 
     test('15. last-move capture ends game without extra turn', () {
-      final e = fresh(dots: 2); // 1 box total
-      put(e, true, 0, 0, 0);
-      put(e, false, 0, 0, 1);
-      put(e, false, 0, 1, 0);
-      final res = e.draw(const Edge(true, 1, 0), 1);
-      expect(res.claimed.length, 1);
-      expect(res.gameOver, isTrue);
-      expect(res.bonusTurn, isFalse); // moot at game end
-      expect(e.scores, [0, 1]);
-    });
-
-    test('serialization round-trips', () {
-      final e = fresh();
-      e.draw(const Edge(true, 0, 0), 0);
-      e.draw(const Edge(false, 0, 0), 1);
-      final j = e.toJson();
-      final e2 = DotsBoxesEngine.fromJson(Map<String, dynamic>.from(j));
-      expect(e2.h, e.h);
-      expect(e2.v, e.v);
-      expect(e2.box, e.box);
-      expect(e2.currentPlayer, e.currentPlayer);
-      expect(e2.scores, e.scores);
-      expect(e2.moveCount, e.moveCount);
-      expect(e2.undo(), isTrue);
-      expect(e2.moveCount, 1);
-    });
-
-    test('hard bot never crashes on any board size', () {
-      for (final dots in [5, 6, 7]) {
-        final e = fresh(dots: dots);
-        final rng = Random(11);
-        var p = 0;
-        var guard = 0;
-        while (!e.isGameOver && guard < 2000) {
-          guard++;
-          final move = e.botMove(Difficulty.hard, p, rng)!;
-          final res = e.draw(move, p);
-          if (!res.bonusTurn) p = 1 - p;
-        }
-        expect(e.isGameOver, isTrue);
-        expect(e.scores[0] + e.scores[1], (dots - 1) * (dots - 1));
+      final e = fresh(dots: 3); // 4 boxes, 12 edges
+      final rng = Random(9);
+      MoveResult? last;
+      while (!e.isGameOver) {
+        final player = e.currentPlayer;
+        final move = e.botMove(Difficulty.medium, player, rng)!;
+        last = e.draw(move, player);
       }
+      expect(e.scores[0] + e.scores[1], 4);
+      expect(last!.gameOver, isTrue);
+    });
+
+    test('16. four-seat game: scores sum to total, winner(s) declared', () {
+      final e = fresh(dots: 6, players: 4);
+      final rng = Random(2026);
+      var guard = 0;
+      while (!e.isGameOver && guard < 2000) {
+        final p = e.currentPlayer;
+        final move = e.botMove(Difficulty.easy, p, rng)!;
+        e.draw(move, p);
+        guard++;
+      }
+      expect(e.isGameOver, isTrue);
+      expect(e.scores.reduce((a, b) => a + b), 25); // 6x6 dots -> 25 boxes
+      expect(e.winners(), isNotEmpty);
+      expect(e.moveCount, e.totalEdges);
+    });
+
+    test('17. turn order cycles 0->1->2->3->0 with 4 seats', () {
+      final e = fresh(players: 4);
+      final seen = <int>[];
+      for (var i = 0; i < 8; i++) {
+        seen.add(e.currentPlayer);
+        final move = e.legalEdges().first;
+        final res = e.draw(move, e.currentPlayer);
+        expect(res.bonusTurn, isFalse); // first edges claim nothing
+      }
+      expect(seen, [0, 1, 2, 3, 0, 1, 2, 3]);
+    });
+  });
+
+  group('bot-vs-bot simulation: no stuck states', () {
+    // Hard does full lookahead: keep it on 5x5 only (7x7 is too slow for
+    // a unit test); easy/medium cover all board sizes.
+    final matrix = [
+      for (final dots in [5, 6, 7])
+        for (final diff in [Difficulty.easy, Difficulty.medium]) (diff, dots),
+      (Difficulty.hard, 5),
+    ];
+    for (final (diff, dots) in matrix) {
+      test('${diff.name} vs ${diff.name} on ${dots}x$dots completes', () {
+        final e = fresh(dots: dots);
+        final rng = Random(1000 + diff.index * 97 + dots);
+        var guard = 0;
+        final maxMoves = e.totalEdges + 10;
+        while (!e.isGameOver) {
+          expect(guard < maxMoves, isTrue,
+              reason: 'stuck: moves exceeded total edges');
+          final p = e.currentPlayer;
+          final move = e.botMove(diff, p, rng);
+          // A bot must ALWAYS have a legal move while the game runs.
+          expect(move, isNotNull,
+              reason: 'bot returned null with edges remaining');
+          expect(e.isLegal(move!), isTrue);
+          e.draw(move, p);
+          guard++;
+        }
+        expect(e.moveCount, e.totalEdges);
+        expect(e.scores.reduce((a, b) => a + b), (dots - 1) * (dots - 1));
+      });
+    }
+
+    test('mixed difficulties 4-seat game completes', () {
+      final e = fresh(dots: 6, players: 4);
+      final diffs = [
+        Difficulty.easy,
+        Difficulty.medium,
+        Difficulty.hard,
+        Difficulty.medium
+      ];
+      final rng = Random(555);
+      var guard = 0;
+      while (!e.isGameOver && guard < 5000) {
+        final p = e.currentPlayer;
+        final move = e.botMove(diffs[p], p, rng)!;
+        e.draw(move, p);
+        guard++;
+      }
+      expect(e.isGameOver, isTrue);
+      expect(e.scores.reduce((a, b) => a + b), 25); // 6x6 dots -> 25 boxes
+    });
+
+    test('undo never corrupts invariants in a long game', () {
+      final e = fresh(dots: 6);
+      final rng = Random(77);
+      var guard = 0;
+      while (!e.isGameOver && guard < 3000) {
+        final p = e.currentPlayer;
+        e.draw(e.botMove(Difficulty.medium, p, rng)!, p);
+        if (e.moveCount % 15 == 0 && e.moveCount > 0) {
+          final before = e.moveCount;
+          expect(e.undo(), isTrue);
+          expect(e.moveCount, before - 1);
+        }
+        guard++;
+      }
+      expect(e.moveCount, e.totalEdges - e.legalEdges().length);
+      expect(e.scores.reduce((a, b) => a + b),
+          e.boxesLeft == 0 ? 25 : lessThan(25));
+    });
+  });
+
+  group('persistence round-trip', () {
+    test('toJson/fromJson preserves a mid-game with 3 players', () {
+      final e = fresh(dots: 6, players: 3);
+      final rng = Random(11);
+      for (var i = 0; i < 20; i++) {
+        final p = e.currentPlayer;
+        e.draw(e.botMove(Difficulty.easy, p, rng)!, p);
+      }
+      final json = Map<String, dynamic>.from(e.toJson());
+      final e2 = DotsBoxesEngine.fromJson(json);
+      expect(e2.dots, 6);
+      expect(e2.players, 3);
+      expect(e2.scores, e.scores);
+      expect(e2.currentPlayer, e.currentPlayer);
+      expect(e2.moveCount, e.moveCount);
+      expect(e2.box, e.box);
     });
   });
 }

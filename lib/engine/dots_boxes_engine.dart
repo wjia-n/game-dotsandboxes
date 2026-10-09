@@ -1,10 +1,16 @@
 import 'dart:math';
 
 /// Pure, deterministic Dots & Boxes engine.
+///
 /// Rules source of truth: stitch-batch4/dotsandboxes/RULES.md.
 ///
-/// Board: [dots] x [dots] pegs (5, 6 or 7). Boxes = (dots-1)^2.
-/// Edges record the drawing player (0/1). Boxes record the claiming player.
+/// Board: [dots] x [dots] pegs (5, 6 or 7). Boxes = (dots-1)^2 exactly.
+/// Edges record the drawing player (0..players-1). Boxes record the claiming
+/// player. Supports 2-4 players (pass-and-play / mixed human+bot seats).
+///
+/// Turn rules (RULES.md §3, §6): drawing the 4th side of a box claims it and
+/// grants ONE bonus turn (even when two boxes are claimed at once). The turn
+/// otherwise advances to the next seat in order.
 class Edge {
   final bool horizontal;
   final int r;
@@ -13,7 +19,10 @@ class Edge {
 
   @override
   bool operator ==(Object other) =>
-      other is Edge && horizontal == other.horizontal && r == other.r && c == other.c;
+      other is Edge &&
+      horizontal == other.horizontal &&
+      r == other.r &&
+      c == other.c;
   @override
   int get hashCode => Object.hash(horizontal, r, c);
   @override
@@ -24,7 +33,8 @@ class MoveResult {
   final List<Point<int>> claimed; // [r, c] of captured boxes
   final bool bonusTurn;
   final bool gameOver;
-  const MoveResult({required this.claimed, required this.bonusTurn, required this.gameOver});
+  const MoveResult(
+      {required this.claimed, required this.bonusTurn, required this.gameOver});
 }
 
 class _MoveRecord {
@@ -43,7 +53,9 @@ class _MoveRecord {
   static _MoveRecord fromJson(Map<String, dynamic> j) => _MoveRecord(
         Edge(j['h'] as bool, j['r'] as int, j['c'] as int),
         j['p'] as int,
-        (j['b'] as List).map((e) => Point<int>(e[0] as int, e[1] as int)).toList(),
+        (j['b'] as List)
+            .map((e) => Point<int>(e[0] as int, e[1] as int))
+            .toList(),
       );
 }
 
@@ -51,15 +63,17 @@ enum Difficulty { easy, medium, hard }
 
 class DotsBoxesEngine {
   final int dots;
+  final int players;
   late List<List<int>> h; // dots x (dots-1): horizontal edge owner or -1
   late List<List<int>> v; // (dots-1) x dots: vertical edge owner or -1
   late List<List<int>> box; // (dots-1) x (dots-1): box owner or -1
   int currentPlayer = 0;
-  final List<int> scores = [0, 0];
+  late List<int> scores;
   final List<_MoveRecord> _history = [];
 
-  DotsBoxesEngine({this.dots = 6}) {
+  DotsBoxesEngine({this.dots = 6, this.players = 2}) {
     assert(dots >= 2);
+    assert(players >= 2 && players <= 4);
     reset();
   }
 
@@ -68,16 +82,23 @@ class DotsBoxesEngine {
     v = List.generate(dots - 1, (_) => List.filled(dots, -1));
     box = List.generate(dots - 1, (_) => List.filled(dots - 1, -1));
     currentPlayer = 0;
-    scores[0] = 0;
-    scores[1] = 0;
+    scores = List.filled(players, 0);
     _history.clear();
   }
 
   int get boxesPerSide => dots - 1;
+
+  /// Exact box count for a dots×dots peg grid. RULES.md §8: (dots-1)².
   int get totalBoxes => (dots - 1) * (dots - 1);
-  int get boxesLeft => box.expand((row) => row).where((o) => o == -1).length;
+
+  int get boxesLeft =>
+      box.expand((row) => row).where((o) => o == -1).length;
+
   bool get isGameOver => boxesLeft == 0;
   int get moveCount => _history.length;
+
+  /// Total edges on the board: dots*(dots-1) horizontal + (dots-1)*dots vertical.
+  int get totalEdges => 2 * dots * (dots - 1);
 
   bool isLegal(Edge e) {
     if (e.horizontal) {
@@ -110,9 +131,16 @@ class DotsBoxesEngine {
   }
 
   /// Draws [edge] for [player]. Throws [StateError] on illegal moves.
+  ///
+  /// Box claims: every box whose 4th side was just drawn is claimed by
+  /// [player] (0, 1 or 2 boxes). A claim grants exactly one bonus turn;
+  /// otherwise the turn advances to the next seat.
   MoveResult draw(Edge edge, int player) {
     if (!isLegal(edge)) throw StateError('Illegal edge: $edge');
     if (isGameOver) throw StateError('Game is over');
+    if (player < 0 || player >= players) {
+      throw StateError('Bad player: $player');
+    }
     if (edge.horizontal) {
       h[edge.r][edge.c] = player;
     } else {
@@ -129,7 +157,11 @@ class DotsBoxesEngine {
     _history.add(_MoveRecord(edge, player, claimed));
     final over = isGameOver;
     final bonus = claimed.isNotEmpty && !over;
-    if (!bonus && !over) currentPlayer = 1 - player;
+    if (!bonus && !over) {
+      currentPlayer = (player + 1) % players;
+    } else {
+      currentPlayer = player;
+    }
     return MoveResult(claimed: claimed, bonusTurn: bonus, gameOver: over);
   }
 
@@ -149,6 +181,18 @@ class DotsBoxesEngine {
     }
     currentPlayer = rec.player;
     return true;
+  }
+
+  /// Seats tied for the highest box count (1 winner, or 2+ on a tie).
+  /// RULES.md §10: a tie needs the top score shared; possible on any grid
+  /// with 3+ players, or on even box counts with 2 players.
+  List<int> winners() {
+    final top = scores.reduce(max);
+    final out = <int>[];
+    for (var i = 0; i < players; i++) {
+      if (scores[i] == top) out.add(i);
+    }
+    return out;
   }
 
   List<Edge> legalEdges() {
@@ -193,9 +237,10 @@ class DotsBoxesEngine {
     return n;
   }
 
-  List<List<int>> _copy(List<List<int>> m) => m.map((r) => List<int>.from(r)).toList();
+  List<List<int>> _copy(List<List<int>> m) =>
+      m.map((r) => List<int>.from(r)).toList();
 
-  /// Greedy reply chain for [player] on scratch state: keep taking the move
+  /// Greedy claim chain for [player] on scratch state: keep taking the move
   /// that claims the most boxes until none claims. Returns total claimed.
   int _greedyChain(int player, List<List<int>> hh, List<List<int>> vv,
       List<List<int>> bb, Random rng) {
@@ -231,27 +276,31 @@ class DotsBoxesEngine {
     return total;
   }
 
-  /// Opponent's best immediate greedy reply value after we play [edge]:
-  /// the max boxes the opponent could claim on their next move.
-  int _opponentReplyValue(Edge e, int me) {
+  /// The next seat's best immediate greedy reply value after we play [edge]:
+  /// the max boxes the next player could claim on their next move.
+  int _nextReplyValue(Edge e, int me) {
     final hh = _copy(h);
     final vv = _copy(v);
     final bb = _copy(box);
     _simClaimCount(e, me, hh, vv, bb);
-    final opp = 1 - me;
+    final opp = (me + 1) % players;
     var best = 0;
     for (var r = 0; r < dots; r++) {
       for (var c = 0; c < dots - 1; c++) {
         if (hh[r][c] != -1) continue;
-        best = max(best,
-            _simClaimCount(Edge(true, r, c), opp, _copy(hh), _copy(vv), _copy(bb)));
+        best = max(
+            best,
+            _simClaimCount(
+                Edge(true, r, c), opp, _copy(hh), _copy(vv), _copy(bb)));
       }
     }
     for (var r = 0; r < dots - 1; r++) {
       for (var c = 0; c < dots; c++) {
         if (vv[r][c] != -1) continue;
-        best = max(best,
-            _simClaimCount(Edge(false, r, c), opp, _copy(hh), _copy(vv), _copy(bb)));
+        best = max(
+            best,
+            _simClaimCount(
+                Edge(false, r, c), opp, _copy(hh), _copy(vv), _copy(bb)));
       }
     }
     return best;
@@ -296,7 +345,7 @@ class DotsBoxesEngine {
       }
       if (best != null) return best;
     }
-    // Safe edges: drawing them creates no 3-sided box for the opponent.
+    // Safe edges: drawing them creates no 3-sided box for the next player.
     final safe = free.where((e) {
       final hh = _copy(h), vv = _copy(v), bb = _copy(box);
       _simClaimCount(e, player, hh, vv, bb);
@@ -317,7 +366,7 @@ class DotsBoxesEngine {
     var best = free.first;
     var bestCost = 1 << 30;
     for (final e in free) {
-      final cost = _opponentReplyValue(e, player);
+      final cost = _nextReplyValue(e, player);
       if (cost < bestCost) {
         bestCost = cost;
         best = e;
@@ -326,8 +375,8 @@ class DotsBoxesEngine {
     return best;
   }
 
-  /// Hard: Medium's instincts plus 2-ply lookahead — score every candidate by
-  /// (own greedy chain) minus (opponent greedy reply chain), take the max.
+  /// Hard: Medium's instincts plus lookahead — score every candidate by
+  /// (own greedy chain) minus (next player's greedy reply chain), take max.
   Edge _hardMove(List<Edge> free, int player, Random rng) {
     var best = free.first;
     var bestNet = -(1 << 30);
@@ -336,7 +385,7 @@ class DotsBoxesEngine {
       final hh = _copy(h), vv = _copy(v), bb = _copy(box);
       var mine = _simClaimCount(e, player, hh, vv, bb);
       mine += _greedyChain(player, hh, vv, bb, rng);
-      final opp = 1 - player;
+      final opp = (player + 1) % players;
       final theirs = _greedyChain(opp, hh, vv, bb, rng);
       final net = mine - theirs;
       if (net > bestNet) {
@@ -347,13 +396,14 @@ class DotsBoxesEngine {
     return best;
   }
 
-  /// A good suggested edge for the human (uses hard-ish evaluation).
+  /// A good suggested edge for the human (uses hard evaluation).
   Edge? hint(int player, Random rng) => botMove(Difficulty.hard, player, rng);
 
   // ---------------- Persistence ----------------
 
   Map<String, dynamic> toJson() => {
         'dots': dots,
+        'players': players,
         'h': h,
         'v': v,
         'box': box,
@@ -363,20 +413,25 @@ class DotsBoxesEngine {
       };
 
   static DotsBoxesEngine fromJson(Map<String, dynamic> j) {
-    final e = DotsBoxesEngine(dots: (j['dots'] as int?) ?? 6);
-    List<List<int>> cast(dynamic m) =>
-        (m as List).map((r) => (r as List).map((x) => x as int).toList()).toList();
+    final e = DotsBoxesEngine(
+      dots: (j['dots'] as int?) ?? 6,
+      players: ((j['players'] as int?) ?? 2).clamp(2, 4),
+    );
+    List<List<int>> cast(dynamic m) => (m as List)
+        .map((r) => (r as List).map((x) => x as int).toList())
+        .toList();
     e.h = cast(j['h']);
     e.v = cast(j['v']);
     e.box = cast(j['box']);
     e.currentPlayer = (j['turn'] as int?) ?? 0;
     final sc = (j['scores'] as List?) ?? [0, 0];
-    e.scores[0] = sc[0] as int;
-    e.scores[1] = sc[1] as int;
+    for (var i = 0; i < e.players && i < sc.length; i++) {
+      e.scores[i] = sc[i] as int;
+    }
     e._history
       ..clear()
-      ..addAll((j['hist'] as List? ?? const [])
-          .map((m) => _MoveRecord.fromJson(Map<String, dynamic>.from(m as Map))));
+      ..addAll((j['hist'] as List? ?? const []).map((m) =>
+          _MoveRecord.fromJson(Map<String, dynamic>.from(m as Map))));
     return e;
   }
 }

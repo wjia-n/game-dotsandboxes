@@ -1,195 +1,217 @@
 import 'package:flutter/material.dart';
 
-import '../engine/audio.dart';
-import '../engine/dots_boxes_engine.dart';
-import '../state/settings_store.dart';
-import '../toybox/palette.dart';
-import '../toybox/wood_widgets.dart';
+import '../services/audio_service.dart';
+import '../services/settings_service.dart';
+import '../theme/toybox_themes.dart';
+import '../toybox/widgets.dart';
 
-/// Settings: painted title, wooden cards for sound/music/board/robot/vibration,
-/// volume sliders, reset-scores tag, Done button.
+/// Settings: sound/music/volume, player names (4 renameable slots),
+/// board size, vibration, stats reset.
 class SettingsScreen extends StatelessWidget {
-  final SettingsStore settings;
-  const SettingsScreen({super.key, required this.settings});
+  final ToyboxAudio audio;
+  final ToyboxSettings settings;
+  const SettingsScreen(
+      {super.key, required this.audio, required this.settings});
+
+  ToyThemeDef get _t => settings.theme;
 
   @override
   Widget build(BuildContext context) {
+    final t = _t;
+    final s = settings;
     return Scaffold(
-      backgroundColor: ToyPalette.paper,
-      body: SafeArea(
-        child: ListenableBuilder(
-          listenable: settings,
-          builder: (_, _) => SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(24, 18, 24, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(child: Text('Settings', style: ToyType.h1)),
-                const SizedBox(height: 18),
-                _Card(
-                  title: 'Sound',
-                  child: _ToggleRow(
-                    value: settings.sfxOn,
-                    onChanged: (v) {
-                      settings.setSfx(v);
-                      ToyAudio.instance.sfx('click.wav');
-                    },
-                  ),
-                ),
-                _Card(
-                  title: 'Music',
-                  child: Column(
+      body: ToyBackdrop(
+        theme: t,
+        child: SafeArea(
+          child: ListenableBuilder(
+            listenable: s,
+            builder: (_, _) => SingleChildScrollView(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      _ToggleRow(
-                        value: settings.musicOn,
-                        onChanged: settings.setMusic,
+                      ToyIconButton(
+                        icon: Icons.arrow_back,
+                        size: 44,
+                        onTap: () {
+                          audio.click();
+                          Navigator.of(context).pop();
+                        },
                       ),
-                      _VolumeRow(
-                        icon: Icons.music_note,
-                        value: settings.musicVolume,
-                        onChanged: settings.setMusicVolume,
-                      ),
+                      const SizedBox(width: 12),
+                      Text('Settings', style: toyHeadline(26, t)),
                     ],
                   ),
-                ),
-                _Card(
-                  title: 'Effects volume',
-                  child: _VolumeRow(
-                    icon: Icons.volume_up,
-                    value: settings.sfxVolume,
-                    onChanged: (v) {
-                      settings.setSfxVolume(v);
-                      ToyAudio.instance.sfx('click.wav');
-                    },
-                  ),
-                ),
-                _Card(
-                  title: 'Board size',
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [5, 6, 7].map((d) {
-                      final selected = settings.boardDots == d;
-                      return GestureDetector(
-                        onTap: () {
-                          ToyAudio.instance.sfx('click.wav');
-                          settings.setBoardDots(d);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          transform: Matrix4.translationValues(0, selected ? 3.0 : 0.0, 0),
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: selected ? ToyPalette.honey : ToyPalette.paper,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: ToyPalette.oak, width: 2),
-                            boxShadow:
-                                selected ? ToyPalette.pressedShadow() : ToyPalette.plaqueShadow(),
-                          ),
-                          child: Text(
-                            '${d}x$d',
-                            style: ToyType.bodyMd.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: selected ? Colors.white : ToyPalette.ink,
+                  const SizedBox(height: 16),
+                  ToyCard(
+                    theme: t,
+                    child: Column(
+                      children: [
+                        _ToggleRow(
+                          theme: t,
+                          label: 'Music',
+                          value: s.musicOn,
+                          onChanged: (v) {
+                            s.setMusic(v);
+                            if (v) {
+                              audio.startMenuMusic();
+                            } else {
+                              audio.stopMusic();
+                            }
+                          },
+                        ),
+                        _ToggleRow(
+                          theme: t,
+                          label: 'Sound effects',
+                          value: s.sfxOn,
+                          onChanged: (v) {
+                            s.setSfx(v);
+                            if (v) audio.click();
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(Icons.volume_up,
+                                color: t.text.withValues(alpha: 0.7)),
+                            Expanded(
+                              child: Slider(
+                                value: s.volume,
+                                onChanged: (v) {
+                                  s.setVolume(v);
+                                  audio.configure(
+                                    musicOn: s.musicOn,
+                                    sfxOn: s.sfxOn,
+                                    volume: v,
+                                  );
+                                },
+                                onChangeEnd: (_) => audio.click(),
+                              ),
                             ),
-                          ),
+                          ],
                         ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-                _Card(
-                  title: 'Robot difficulty',
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: Difficulty.values.map((d) {
-                      final selected = settings.difficulty == d;
-                      final label = switch (d) {
-                        Difficulty.easy => 'Easy',
-                        Difficulty.medium => 'Medium',
-                        Difficulty.hard => 'Hard',
-                      };
-                      return GestureDetector(
-                        onTap: () {
-                          ToyAudio.instance.sfx('click.wav');
-                          settings.setDifficulty(d);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          transform: Matrix4.translationValues(0, selected ? 3.0 : 0.0, 0),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: selected ? ToyPalette.blue : ToyPalette.paper,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: ToyPalette.oak, width: 2),
-                            boxShadow:
-                                selected ? ToyPalette.pressedShadow() : ToyPalette.plaqueShadow(),
-                          ),
-                          child: Text(
-                            label,
-                            style: ToyType.bodyMd.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: selected ? Colors.white : ToyPalette.ink,
-                            ),
-                          ),
+                        _ToggleRow(
+                          theme: t,
+                          label: 'Vibration',
+                          value: s.vibrationOn,
+                          onChanged: s.setVibration,
                         ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-                _Card(
-                  title: 'Vibration',
-                  child: _ToggleRow(
-                    value: settings.vibrationOn,
-                    onChanged: settings.setVibration,
-                  ),
-                ),
-                Center(
-                  child: GestureDetector(
-                    onTap: () {
-                      ToyAudio.instance.sfx('invalid.wav');
-                      settings.resetScores();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Scores cleared', style: ToyType.bodyMd),
-                          backgroundColor: ToyPalette.walnut,
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: ToyPalette.paper,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: ToyPalette.walnut, width: 2),
-                        boxShadow: ToyPalette.plaqueShadow(),
-                      ),
-                      child: Text('Reset scores', style: ToyType.label),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Center(
-                  child: Text(
-                    'Played ${settings.gamesPlayed} · Won ${settings.wins} · '
-                    'Lost ${settings.losses} · Tied ${settings.ties}',
-                    style: ToyType.bodySm,
-                    textAlign: TextAlign.center,
+                  const SizedBox(height: 16),
+                  ToyCard(
+                    theme: t,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                            child:
+                                SectionLabel(theme: t, text: 'PLAYER NAMES')),
+                        const SizedBox(height: 10),
+                        for (var i = 0; i < 4; i++)
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 22,
+                                  height: 22,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: t.playerColor(i),
+                                    border: Border.all(
+                                        color: t.pegDeep, width: 1.5),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: TextField(
+                                    key: ValueKey('name_$i'),
+                                    controller: TextEditingController(
+                                        text: s.playerNames[i])
+                                      ..selection =
+                                          TextSelection.collapsed(
+                                              offset:
+                                                  s.playerNames[i].length),
+                                    maxLength: 16,
+                                    style: toyBody(15, t),
+                                    decoration: InputDecoration(
+                                      counterText: '',
+                                      isDense: true,
+                                      filled: true,
+                                      fillColor: Colors.white
+                                          .withValues(alpha: 0.5),
+                                      border: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(10),
+                                        borderSide: BorderSide(
+                                            color: t.woodDark),
+                                      ),
+                                    ),
+                                    onSubmitted: (v) =>
+                                        s.setPlayerName(i, v),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        Center(
+                          child: Text(
+                            'Names are used for every seat, in every mode.',
+                            style: toyBody(12, t,
+                                color:
+                                    t.text.withValues(alpha: 0.6)),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 22),
-                Center(
-                  child: WoodButton(
-                    label: 'Done',
-                    width: 220,
-                    height: 56,
-                    icon: Icons.check,
-                    onTap: () => Navigator.of(context).pop(),
-                    color: ToyPalette.blue,
-                    bevel: ToyPalette.blueDeep,
+                  const SizedBox(height: 16),
+                  ToyCard(
+                    theme: t,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                            child: SectionLabel(
+                                theme: t, text: 'SCORES')),
+                        const SizedBox(height: 10),
+                        Text(
+                            'Wins ${s.wins} · Losses ${s.losses} · Ties ${s.ties} · Games ${s.gamesPlayed}',
+                            style: toyBody(15, t)),
+                        const SizedBox(height: 12),
+                        Center(
+                          child: ToyButton(
+                            label: 'Reset scores',
+                            small: true,
+                            onTap: () {
+                              audio.click();
+                              s.resetStats();
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 20),
+                  Center(
+                    child: ToyButton(
+                      label: 'Done',
+                      color: const Color(0xFF3B9FE2),
+                      onTap: () {
+                        audio.click();
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+              ),
             ),
           ),
         ),
@@ -198,100 +220,28 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-class _Card extends StatelessWidget {
-  final String title;
-  final Widget child;
-  const _Card({required this.title, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
-      decoration: BoxDecoration(
-        color: ToyPalette.maple,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: ToyPalette.oak, width: 2),
-        boxShadow: ToyPalette.plaqueShadow(),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: ToyType.h3.copyWith(fontSize: 17)),
-          const SizedBox(height: 8),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-/// Chunky wooden ON/OFF toggle.
 class _ToggleRow extends StatelessWidget {
+  final ToyThemeDef theme;
+  final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
-  const _ToggleRow({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      child: Row(
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: 64,
-            height: 34,
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(
-              color: value ? ToyPalette.leaf : ToyPalette.channel,
-              borderRadius: BorderRadius.circular(17),
-              border: Border.all(color: ToyPalette.walnut, width: 2),
-              boxShadow: ToyPalette.pressedShadow(),
-            ),
-            alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-            child: Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const RadialGradient(
-                  center: Alignment(-0.35, -0.4),
-                  colors: [Color(0xFFB07B45), ToyPalette.walnut],
-                ),
-                border: Border.all(color: ToyPalette.walnutDeep, width: 1.5),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Text(value ? 'ON' : 'OFF', style: ToyType.bodyLg),
-        ],
-      ),
-    );
-  }
-}
-
-class _VolumeRow extends StatelessWidget {
-  final IconData icon;
-  final double value;
-  final ValueChanged<double> onChanged;
-  const _VolumeRow({required this.icon, required this.value, required this.onChanged});
+  const _ToggleRow({
+    required this.theme,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: ToyPalette.walnut),
         Expanded(
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              activeTrackColor: ToyPalette.honey,
-              inactiveTrackColor: ToyPalette.channel,
-              thumbColor: ToyPalette.walnut,
-              overlayColor: ToyPalette.honey.withValues(alpha: 0.2),
-            ),
-            child: Slider(value: value, onChanged: onChanged),
-          ),
+            child: Text(label, style: toyBody(16, theme))),
+        Switch(
+          value: value,
+          onChanged: onChanged,
+          activeTrackColor: theme.wood,
         ),
       ],
     );
