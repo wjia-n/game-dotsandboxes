@@ -22,7 +22,12 @@ class ToyboxSettings extends ChangeNotifier {
   static const _kDiff = '${_p}difficulty'; // 0 easy, 1 medium, 2 hard
   static const _kPlayers = '${_p}player_count'; // 2..4
   static const _kBotSeats = '${_p}bot_seats'; // StringList of seat indices
-  static const _kNames = '${_p}player_names'; // StringList, 4 entries
+  static const _kNames = '${_p}player_names'; // legacy unordered StringSet key
+  /// Order-safe player-name storage: a single JSON string. Android's
+  /// SharedPreferences stores StringLists as an unordered StringSet, so the
+  /// old key scrambled name order on every app restart. Never use a
+  /// StringList for ordered data on Android.
+  static const _kNamesJson = 'dotsandboxes_player_names_json';
   static const _kTheme = '${_p}theme_id';
   static const _kLineStyle = '${_p}line_style';
   static const _kPaper = '${_p}paper_accent';
@@ -35,6 +40,26 @@ class ToyboxSettings extends ChangeNotifier {
   static const _kCustomPrefix = '${_p}custom_';
 
   static const defaultNames = ['You', 'Robot', 'Player 3', 'Player 4'];
+
+  /// Encode the 4 player names as one JSON string (order-preserving).
+  static String encodePlayerNames(List<String> names) => jsonEncode(names);
+
+  static String _cleanName(int i, Object? v) {
+    final s = v is String ? v.trim() : '';
+    return s.isEmpty ? defaultNames[i] : s;
+  }
+
+  /// Decode persisted names; falls back to defaults on missing/corrupt data.
+  static List<String> decodePlayerNames(String? raw) {
+    if (raw == null) return List.of(defaultNames);
+    try {
+      final d = jsonDecode(raw);
+      if (d is List && d.length == 4) {
+        return [for (int i = 0; i < 4; i++) _cleanName(i, d[i])];
+      }
+    } catch (_) {}
+    return List.of(defaultNames);
+  }
 
   bool musicOn = true;
   bool sfxOn = true;
@@ -112,12 +137,17 @@ class ToyboxSettings extends ChangeNotifier {
     difficulty = (p.getInt(_kDiff) ?? 1).clamp(0, 2);
     playerCount = (p.getInt(_kPlayers) ?? 2).clamp(2, 4);
     botSeats = _readSeats(p);
-    final names = p.getStringList(_kNames);
-    if (names != null && names.length == 4) {
-      playerNames = [
-        for (int i = 0; i < 4; i++)
-          names[i].trim().isEmpty ? defaultNames[i] : names[i].trim()
-      ];
+    // Player names: prefer the order-safe JSON key. Fall back to the legacy
+    // StringList key once (one-time migration); it may already be scrambled
+    // on Android, which is exactly the bug this replaces.
+    final namesRaw = p.getString(_kNamesJson);
+    if (namesRaw != null) {
+      playerNames = decodePlayerNames(namesRaw);
+    } else {
+      final legacy = p.getStringList(_kNames);
+      playerNames = (legacy != null && legacy.length == 4)
+          ? [for (int i = 0; i < 4; i++) _cleanName(i, legacy[i])]
+          : List.of(defaultNames);
     }
     themeId = p.getString(_kTheme) ?? 'classic';
     lineStyle = (p.getInt(_kLineStyle) ?? 0).clamp(0, LineStyles.names.length - 1);
@@ -160,7 +190,8 @@ class ToyboxSettings extends ChangeNotifier {
     await p.setInt(_kPlayers, playerCount);
     await p.setStringList(
         _kBotSeats, [for (final s in botSeats) s.toString()]);
-    await p.setStringList(_kNames, playerNames);
+    await p.setString(_kNamesJson, encodePlayerNames(playerNames));
+    await p.remove(_kNames); // drop the legacy unordered key for good
     await p.setString(_kTheme, themeId);
     await p.setInt(_kLineStyle, lineStyle);
     await p.setInt(_kPaper, paperAccent);

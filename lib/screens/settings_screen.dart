@@ -130,31 +130,12 @@ class SettingsScreen extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 10),
                                 Expanded(
-                                  child: TextField(
+                                  child: _NameField(
                                     key: ValueKey('name_$i'),
-                                    controller: TextEditingController(
-                                        text: s.playerNames[i])
-                                      ..selection =
-                                          TextSelection.collapsed(
-                                              offset:
-                                                  s.playerNames[i].length),
-                                    maxLength: 16,
-                                    style: toyBody(15, t),
-                                    decoration: InputDecoration(
-                                      counterText: '',
-                                      isDense: true,
-                                      filled: true,
-                                      fillColor: Colors.white
-                                          .withValues(alpha: 0.5),
-                                      border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(10),
-                                        borderSide: BorderSide(
-                                            color: t.woodDark),
-                                      ),
-                                    ),
-                                    onSubmitted: (v) =>
-                                        s.setPlayerName(i, v),
+                                    theme: t,
+                                    index: i,
+                                    initial: s.playerNames[i],
+                                    onChanged: (v) => s.setPlayerName(i, v),
                                   ),
                                 ),
                               ],
@@ -244,6 +225,81 @@ class _ToggleRow extends StatelessWidget {
           activeTrackColor: theme.wood,
         ),
       ],
+    );
+  }
+}
+
+/// Player-name rename field: saves on every keystroke AND on focus loss
+/// (tapping elsewhere) AND on keyboard-done, so a rename is never lost.
+/// The controller lives in state so rebuilds from [onChanged] saves don't
+/// jump the cursor.
+class _NameField extends StatefulWidget {
+  final ToyThemeDef theme;
+  final int index;
+  final String initial;
+  final ValueChanged<String> onChanged;
+  const _NameField({
+    super.key,
+    required this.theme,
+    required this.index,
+    required this.initial,
+    required this.onChanged,
+  });
+
+  @override
+  State<_NameField> createState() => _NameFieldState();
+}
+
+class _NameFieldState extends State<_NameField> {
+  late final TextEditingController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = TextEditingController(text: widget.initial)
+      ..selection = TextSelection.collapsed(offset: widget.initial.length);
+  }
+
+  @override
+  void didUpdateWidget(covariant _NameField old) {
+    super.didUpdateWidget(old);
+    if (old.initial != widget.initial && _c.text != widget.initial) {
+      _c.text = widget.initial;
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  void _commit() => widget.onChanged(_c.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.theme;
+    return Focus(
+      onFocusChange: (hasFocus) {
+        if (!hasFocus) _commit(); // tap elsewhere commits the rename
+      },
+      child: TextField(
+        controller: _c,
+        maxLength: 16,
+        style: toyBody(15, t),
+        decoration: InputDecoration(
+          counterText: '',
+          isDense: true,
+          filled: true,
+          fillColor: Colors.white.withValues(alpha: 0.5),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: t.woodDark),
+          ),
+        ),
+        onChanged: (_) => _commit(), // save on every keystroke
+        onSubmitted: (_) => _commit(), // keyboard-done commits too
+      ),
     );
   }
 }
