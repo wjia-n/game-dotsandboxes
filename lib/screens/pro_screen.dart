@@ -32,26 +32,10 @@ class _ProScreenState extends State<ProScreen> {
   @override
   void initState() {
     super.initState();
-    widget.store.proPurchased.addListener(_onPro);
     widget.store.lastThanks.addListener(_onThanks);
   }
 
-  void _onPro() {
-    if (widget.store.proPurchased.value && mounted) {
-      widget.settings.setPro(true);
-      widget.audio.win();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('PRO unlocked — enjoy everything!',
-              style: toyBody(15, _t)),
-          backgroundColor: _t.woodDark,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      widget.store.proPurchased.value = false;
-    }
-  }
-
+  
   void _onThanks() {
     final msg = widget.store.lastThanks.value;
     if (msg == null || !mounted) return;
@@ -68,7 +52,6 @@ class _ProScreenState extends State<ProScreen> {
 
   @override
   void dispose() {
-    widget.store.proPurchased.removeListener(_onPro);
     widget.store.lastThanks.removeListener(_onThanks);
     super.dispose();
   }
@@ -105,16 +88,7 @@ class _ProScreenState extends State<ProScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  _ComparisonCard(theme: t, isPro: s.isPro),
-                  const SizedBox(height: 16),
-                  _BuyCard(
-                    theme: t,
-                    settings: s,
-                    store: store,
-                    audio: widget.audio,
-                  ),
-                  const SizedBox(height: 16),
-                  _TipsCard(
+                                    _TipsCard(
                     theme: t,
                     store: store,
                     audio: widget.audio,
@@ -125,186 +99,6 @@ class _ProScreenState extends State<ProScreen> {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ComparisonCard extends StatelessWidget {
-  final ToyThemeDef theme;
-  final bool isPro;
-  const _ComparisonCard({required this.theme, required this.isPro});
-
-  @override
-  Widget build(BuildContext context) {
-    const rows = [
-      ('Play vs robot & pass-and-play', true, true),
-      ('3 board sizes (5×5, 6×6, 7×7)', true, true),
-      ('4 wooden-toy themes', true, true),
-      ('4 line styles', true, true),
-      ('8 more themes (Midnight, Berry…)', false, true),
-      ('4 more line styles (Gel, Brush…)', false, true),
-      ('3 paper accents + felt, denim, cork', false, true),
-      ('Hard robot difficulty', false, true),
-      ('Custom theme creator', false, true),
-    ];
-    return ToyCard(
-      theme: theme,
-      child: Column(
-        children: [
-          Text(
-            isPro ? 'You have PRO 🎉' : 'Free vs PRO',
-            style: toyHeadline(20, theme),
-          ),
-          const SizedBox(height: 10),
-          Table(
-            columnWidths: const {
-              0: FlexColumnWidth(3),
-              1: FlexColumnWidth(1),
-              2: FlexColumnWidth(1),
-            },
-            children: [
-              TableRow(
-                children: [
-                  const SizedBox(),
-                  Center(
-                      child: Text('Free',
-                          style: toyBody(13, theme,
-                              color: theme.text
-                                  .withValues(alpha: 0.6)))),
-                  Center(
-                      child: Text('PRO',
-                          style: toyBody(13, theme))),
-                ],
-              ),
-              for (final (label, free, pro) in rows)
-                TableRow(
-                  children: [
-                    Padding(
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 5),
-                      child: Text(label,
-                          style: toyBody(13, theme)),
-                    ),
-                    Center(
-                        child: Icon(
-                            free
-                                ? Icons.check_circle
-                                : Icons.remove_circle_outline,
-                            size: 18,
-                            color: free
-                                ? const Color(0xFF7CB342)
-                                : theme.text
-                                    .withValues(alpha: 0.3))),
-                    Center(
-                        child: Icon(Icons.check_circle,
-                            size: 18,
-                            color: pro
-                                ? const Color(0xFFE8B93C)
-                                : theme.text
-                                    .withValues(alpha: 0.3))),
-                  ],
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BuyCard extends StatelessWidget {
-  final ToyThemeDef theme;
-  final ToyboxSettings settings;
-  final StoreService store;
-  final ToyboxAudio audio;
-  const _BuyCard({
-    required this.theme,
-    required this.settings,
-    required this.store,
-    required this.audio,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (settings.isPro) {
-      return ToyCard(
-        theme: theme,
-        child: Row(
-          children: [
-            const Icon(Icons.workspace_premium,
-                color: Color(0xFFE8B93C), size: 30),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'PRO is active on this device. All themes, styles and Hard mode are unlocked.',
-                style: toyBody(14, theme),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-    final product = store.proProduct;
-    if (!store.storeReady || product == null) {
-      return ToyCard(
-        theme: theme,
-        child: Column(
-          children: [
-            Text('PRO unlock', style: toyHeadline(18, theme)),
-            const SizedBox(height: 8),
-            Text(
-              'PRO purchases will appear here once the store products are set up. The game is fully playable for free meanwhile!',
-              style: toyBody(14, theme,
-                  color: theme.text.withValues(alpha: 0.7)),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 10),
-            ToyButton(
-              label: 'Restore purchase',
-              small: true,
-              onTap: () {
-                audio.click();
-                store.restore();
-              },
-            ),
-          ],
-        ),
-      );
-    }
-    return ToyCard(
-      theme: theme,
-      child: Column(
-        children: [
-          Text('Unlock PRO forever', style: toyHeadline(18, theme)),
-          const SizedBox(height: 6),
-          Text(
-            'One-time purchase. Every future toybox game keeps it simple: pay once, own it.',
-            style: toyBody(13, theme,
-                color: theme.text.withValues(alpha: 0.7)),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 12),
-          ToyButton(
-            label: 'Get PRO — ${product.price}',
-            icon: Icons.workspace_premium,
-            color: const Color(0xFFE8B93C),
-            onTap: () {
-              audio.click();
-              store.buyPro();
-            },
-          ),
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: () {
-              audio.click();
-              store.restore();
-            },
-            child: Text('Restore purchase',
-                style: toyBody(13, theme,
-                    color: theme.text.withValues(alpha: 0.7))),
-          ),
-        ],
       ),
     );
   }

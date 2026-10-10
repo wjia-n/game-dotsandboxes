@@ -74,7 +74,7 @@ class ToyboxSettings extends ChangeNotifier {
   int lineStyle = 0;
   int paperAccent = 0;
   int wins = 0, losses = 0, ties = 0, gamesPlayed = 0;
-  bool isPro = false;
+  bool isPro = true; // everything unlocked — no Pro version
 
   /// Custom theme colors (ARGB ints). Defaults mirror Classic Toybox.
   Map<String, int> customColors = Map.of(_defaultCustomColors);
@@ -157,7 +157,7 @@ class ToyboxSettings extends ChangeNotifier {
     losses = p.getInt(_kLosses) ?? 0;
     ties = p.getInt(_kTies) ?? 0;
     gamesPlayed = p.getInt(_kPlayed) ?? 0;
-    isPro = p.getBool(_kIsPro) ?? false;
+    isPro = true; // everything unlocked
     for (final k in _defaultCustomColors.keys) {
       customColors[k] = p.getInt('$_kCustomPrefix$k') ?? _defaultCustomColors[k]!;
     }
