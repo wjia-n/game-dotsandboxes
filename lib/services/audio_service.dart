@@ -16,6 +16,9 @@ import 'package:audioplayers/audioplayers.dart';
 ///   resumes exactly where it left off instead of restarting or dying.
 /// - Every public method catches player errors; audio can never crash the app.
 class ToyboxAudio {
+  /// Per-game pitch character (dotsandboxes): 1.21x. Makes SFX unique.
+  static const double _pitchMul = 1.210;
+
   static const int _rate = 22050;
   final AudioPlayer _sfx = AudioPlayer();
   final AudioPlayer _music = AudioPlayer();
@@ -118,6 +121,8 @@ class ToyboxAudio {
 
   List<double> _tone(double freq, double secs,
       {double freqEnd = 0, double attack = 0.02, double harmonics = 0.25}) {
+    freq *= _pitchMul;
+    freqEnd *= _pitchMul;
     final n = (_rate * secs).round();
     final out = List<double>.filled(n, 0);
     for (int i = 0; i < n; i++) {
@@ -206,57 +211,53 @@ class ToyboxAudio {
       _cache.putIfAbsent(key, () => _wav(build()));
 
   Uint8List _menuBytes() => _clip('music_menu', () {
-        // Music-box waltz in C major, 12s loop.
-        final melody = [
-          523.25, 587.33, 659.25, 783.99, 659.25, 587.33, // C D E G E D
-          523.25, 440.0, 392.0, 523.25, 392.0, 440.0, // C A G C G A
-        ];
-        final n = (_rate * 12).round();
-        final out = List<double>.filled(n, 0);
-        final step = n / melody.length;
-        for (int k = 0; k < melody.length; k++) {
-          final start = (step * k).round();
-          final tone = _woodTone(melody[k], 0.9, decay: 9.0);
-          for (int i = 0; i < tone.length && start + i < n; i++) {
-            out[start + i] += tone[i] * 0.5;
+        // E bass + melody 0 – 3 – 5 – 4, 16s loop. Unique to dotsandboxes.
+        final bassNotes = [82.41, 110.00, 138.59, 123.47];
+        final melNotes = [493.88, 659.26, 830.62, 740.00];
+        final out = List<double>.filled((_rate * 16).round(), 0);
+        final segLen = (_rate * 4).round();
+        for (int s = 0; s < 4; s++) {
+          final bass = _tone(bassNotes[s], 3.5, harmonics: 0.4);
+          final mel = _tone(melNotes[s], 1.2, harmonics: 0.25);
+          for (int i = 0; i < bass.length && s * segLen + i < out.length; i++) {
+            out[s * segLen + i] += bass[i] * 0.5;
           }
-        }
-        // soft bass root notes
-        for (final f in [130.81, 98.0, 146.83, 130.81]) {
-          final k = [130.81, 98.0, 146.83, 130.81].indexOf(f);
-          final start = (n * k / 4).round();
-          final tone = _tone(f, 2.6, harmonics: 0.15);
-          for (int i = 0; i < tone.length && start + i < n; i++) {
-            out[start + i] += tone[i] * 0.12;
+          final melStart = s * segLen + segLen ~/ 4;
+          for (int i = 0; i < mel.length && melStart + i < out.length; i++) {
+            out[melStart + i] += mel[i] * 0.35;
           }
         }
         return out;
       });
 
+
   Uint8List _gameBytes() => _clip('music_game', () {
-        // Gentle kalimba-ish plucks over a soft drone, 12s loop.
-        final drone = _padChord([130.81, 196.0], 12.0);
-        final plucks = [
-          392.0,
-          440.0,
-          523.25,
-          587.33,
-          523.25,
-          440.0,
-          392.0,
-          329.63
+        // E waltz 0 – 3 – 5 – 4, 12s loop. Unique to dotsandboxes.
+        final seq = [
+          [164.81, 207.65, 246.94],
+          [220.00, 277.18, 329.63],
+          [277.18, 329.63, 415.31],
+          [246.94, 311.13, 370.00]
         ];
-        final n = (_rate * 12).round();
-        final out = List<double>.from(drone);
-        for (int k = 0; k < plucks.length; k++) {
-          final start = (n * k / plucks.length).round();
-          final tone = _woodTone(plucks[k], 0.6, decay: 12.0);
-          for (int i = 0; i < tone.length && start + i < n; i++) {
-            out[start + i] += tone[i] * 0.4;
-          }
+        final out = <double>[];
+        for (final chord in seq) {
+          // Waltz: bass on 1, chords on 2 and 3
+          final bass = _tone(chord[0] / 2, 0.8, harmonics: 0.3);
+          final ch1 = _padChord([chord[1], chord[2]], 0.7);
+          final ch2 = _padChord([chord[1], chord[2]], 0.7);
+          out.addAll(bass);
+          final gap1 = List<double>.filled((_rate * 0.2).round(), 0);
+          out.addAll(gap1);
+          out.addAll(ch1);
+          final gap2 = List<double>.filled((_rate * 0.2).round(), 0);
+          out.addAll(gap2);
+          out.addAll(ch2);
+          final gap3 = List<double>.filled((_rate * 0.2).round(), 0);
+          out.addAll(gap3);
         }
         return out;
       });
+
 
   // ------------------------------------------------------------------ SFX
   Future<void> _play(Uint8List bytes) async {
