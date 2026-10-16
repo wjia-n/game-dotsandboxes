@@ -4,6 +4,7 @@ import '../services/audio_service.dart';
 import '../services/settings_service.dart';
 import '../theme/toybox_themes.dart';
 import '../toybox/widgets.dart';
+import '../transfer/transfer_ui.dart';
 
 /// Settings: sound/music/volume, player names (4 renameable slots),
 /// board size, vibration, stats reset.
@@ -31,6 +32,7 @@ class SettingsScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+              TransferSaveTile(gameSlug: 'dotsandboxes'),
                   Row(
                     children: [
                       ToyIconButton(
