@@ -52,7 +52,7 @@ class GameController extends ChangeNotifier {
   final ToyboxSettings settings;
   final ToyboxAudio audio;
 
-  late DotsBoxesEngine engine;
+  late DotsBoxesEngine engine = DotsBoxesEngine(dots: 6, players: 2);
   List<Seat> seats = [];
   Difficulty difficulty = Difficulty.medium;
 

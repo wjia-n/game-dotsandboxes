@@ -263,7 +263,7 @@ class ToyboxAudio {
   Future<void> _play(Uint8List bytes) async {
     if (!sfxOn || _disposed) return;
     try {
-      await _sfx.play(BytesSource(bytes));
+      await _sfx.play(BytesSource(bytes)).timeout(const Duration(seconds: 2));
     } catch (_) {}
   }
 
@@ -321,11 +321,11 @@ class ToyboxAudio {
     if (gen != _musicGen || _disposed || !musicOn) return;
     _musicBusy = true;
     try {
-      await _music.stop();
+      await _music.stop().timeout(const Duration(seconds: 2));
       if (gen != _musicGen || _disposed || !musicOn) return;
       _currentTrack = track;
       _pausedByLifecycle = false;
-      await _music.play(BytesSource(bytes()));
+      await _music.play(BytesSource(bytes())).timeout(const Duration(seconds: 3));
     } catch (_) {
       if (gen == _musicGen) _currentTrack = null;
     } finally {
